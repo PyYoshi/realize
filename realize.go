@@ -1,7 +1,6 @@
 package main
 
 import (
-	"flag"
 	"log"
 	_ "net/http/pprof"
 	"os"
@@ -19,23 +18,8 @@ import (
 
 var r realize.Realize
 
-var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to `file`")
-var memprofile = flag.String("memprofile", "", "write memory profile to `file`")
-
 // Realize cli commands
 func main() {
-	flag.Parse()
-	if *cpuprofile != "" {
-		f, err := os.Create(*cpuprofile)
-		if err != nil {
-			log.Fatal("could not create CPU profile: ", err)
-		}
-		if err := pprof.StartCPUProfile(f); err != nil {
-			log.Fatal("could not start CPU profile: ", err)
-		}
-		defer pprof.StopCPUProfile()
-	}
-
 	r.Sync = make(chan string)
 	app := &cli.App{
 		Name:        strings.Title(realize.RPrefix),
@@ -47,6 +31,9 @@ func main() {
 				Aliases:     []string{"s"},
 				Description: "Start " + strings.Title(realize.RPrefix) + " on a given path. If not exist a config file it creates a new one.",
 				Flags: []cli.Flag{
+					&cli.StringFlag{Name: "cpuprofile", Aliases: []string{"cpu"}, Value: "", Usage: "write cpu profile to `file`"},
+					&cli.StringFlag{Name: "memprofile", Aliases: []string{"mem"}, Value: "", Usage: "write memory profile to `file`"},
+
 					&cli.StringFlag{Name: "path", Aliases: []string{"p"}, Value: ".", Usage: "Project base path"},
 					&cli.StringFlag{Name: "name", Aliases: []string{"n"}, Value: "", Usage: "Run a project by its name"},
 					&cli.BoolFlag{Name: "fmt", Aliases: []string{"f"}, Value: false, Usage: "Enable go fmt"},
@@ -119,18 +106,6 @@ func main() {
 	}
 	if err := app.Run(os.Args); err != nil {
 		log.Fatal(err)
-	}
-
-	if *memprofile != "" {
-		f, err := os.Create(*memprofile)
-		if err != nil {
-			log.Fatal("could not create memory profile: ", err)
-		}
-		runtime.GC() // get up-to-date statistics
-		if err := pprof.WriteHeapProfile(f); err != nil {
-			log.Fatal("could not write memory profile: ", err)
-		}
-		f.Close()
 	}
 }
 
@@ -1140,6 +1115,20 @@ func setup(c *cli.Context) (err error) {
 
 // Start realize workflow
 func start(c *cli.Context) (err error) {
+	cpuprofile := c.String("cpuprofile")
+	memprofile := c.String("memprofile")
+
+	if cpuprofile != "" {
+		f, err := os.Create(cpuprofile)
+		if err != nil {
+			log.Fatal("could not create CPU profile: ", err)
+		}
+		if err := pprof.StartCPUProfile(f); err != nil {
+			log.Fatal("could not start CPU profile: ", err)
+		}
+		defer pprof.StopCPUProfile()
+	}
+
 	// set legacy watcher
 	if c.Bool("legacy") {
 		r.Settings.Legacy.Set(c.Bool("legacy"), 1)
@@ -1192,7 +1181,21 @@ func start(c *cli.Context) (err error) {
 		}
 	}
 	// start workflow
-	return r.Start()
+	err = r.Start()
+
+	if memprofile != "" {
+		f, err := os.Create(memprofile)
+		if err != nil {
+			log.Fatal("could not create memory profile: ", err)
+		}
+		runtime.GC() // get up-to-date statistics
+		if err := pprof.WriteHeapProfile(f); err != nil {
+			log.Fatal("could not write memory profile: ", err)
+		}
+		f.Close()
+	}
+
+	return err
 }
 
 // Remove a project from an existing config
